@@ -12,5 +12,5 @@ foreach ($entry in @(@{Name='AI-Office-Morning';Time='09:00';Kind='plan'},@{Name
     $tail = if ($entry.Kind -eq 'plan') { 'daily' } else { 'report --kind close' }
     $action = New-ScheduledTaskAction -Execute $pythonPath -Argument ('"' + $officeScript + '" ' + $tail) -WorkingDirectory $officeRoot
     $trigger = New-ScheduledTaskTrigger -Daily -At $entry.Time
-    Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AI Office v1.1 morning plan and at most one submitted task; evening local report; subscription only' -Force | Select-Object TaskName,State
+    Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'AI Office v1.1 two-office team; morning up to four tasks; evening local report; subscription only' -Force | Select-Object TaskName,State
 }

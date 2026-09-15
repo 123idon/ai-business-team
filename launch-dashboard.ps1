@@ -5,7 +5,7 @@ $officeScript = Join-Path $officeRoot 'office.py'
 $ready = $false
 try {
     $response = Invoke-WebRequest 'http://127.0.0.1:8765/' -TimeoutSec 2
-    $ready = $response.Content -match 'LEE · LOCAL AI OFFICE'
+    $ready = $response.Content -match '<title>AI 사무실'
 } catch { }
 if (-not $ready) {
     Start-Process -FilePath $pythonPath -ArgumentList @(('"' + $officeScript + '"'), 'serve') -WorkingDirectory $officeRoot -WindowStyle Hidden
@@ -13,7 +13,7 @@ if (-not $ready) {
         Start-Sleep -Milliseconds 200
         try {
             $response = Invoke-WebRequest 'http://127.0.0.1:8765/' -TimeoutSec 1
-            if ($response.Content -match 'LEE · LOCAL AI OFFICE') { $ready = $true; break }
+            if ($response.Content -match '<title>AI 사무실') { $ready = $true; break }
         } catch { }
     }
 }

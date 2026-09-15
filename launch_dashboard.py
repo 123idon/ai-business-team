@@ -6,7 +6,7 @@ url='http://127.0.0.1:8765/'
 def ready():
     try:
         with urllib.request.urlopen(url,timeout=1) as r:
-            return 'LOCAL AI OFFICE' in r.read().decode('utf-8')
+            return '<title>AI 사무실' in r.read().decode('utf-8')
     except Exception: return False
 if not ready():
     subprocess.Popen([sys.executable,str(root/'office.py'),'serve'],cwd=root,

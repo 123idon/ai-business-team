@@ -13,3 +13,7 @@ credentials*
 config.json
 company/improvements/
 INSTALLATION-REPORT.md
+inbox/
+orders/
+node_modules/
+V1-VERIFICATION.md
