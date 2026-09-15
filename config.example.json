@@ -1,0 +1,11 @@
+{
+  "timezone": "Asia/Seoul",
+  "primary": "claude_code",
+  "reviewer": "codex_cli",
+  "paid_model_api_enabled": false,
+  "automatic_paid_fallback": false,
+  "max_active_ai_tasks": 1,
+  "max_revision_rounds": 2,
+  "timeout_seconds": 240,
+  "automatic_execution": false
+}

@@ -1,0 +1,15 @@
+data/
+backups/
+runs/
+reports/
+imports/
+*.local.json
+.venv/
+__pycache__/
+*.pyc
+.env*
+auth.json
+credentials*
+config.json
+company/improvements/
+INSTALLATION-REPORT.md
