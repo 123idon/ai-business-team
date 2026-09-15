@@ -341,6 +341,10 @@ def run_task(task_id):
             with db() as c:
                 ids=[r['id'] for r in c.execute('SELECT id FROM evidence WHERE project=?',(task['project'],))]
                 errors=validate(result['text'],json.loads(task['criteria']),ids)
+                if task.get('task_kind')=='advice':
+                    import advisor
+                    try: advisor.parse(result['text'],task['project'])
+                    except (ValueError,KeyError,TypeError) as err: errors.append(str(err))
                 state(c,task_id,'REVIEW',json.dumps(errors))
             if errors: return 'REVIEW'
             if task['important']:

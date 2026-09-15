@@ -5,6 +5,8 @@ from pathlib import Path
 import office
 
 STAFF = [
+ ('baek_advisor','baek','업무 지시 조언자','CEO','인간 CEO의 막연한 고민을 듣고 우선 맡길 일·담당 직원·지시 방식·준비 자료·완료 기준을 추천한다. 상담만으로 업무를 배정하지 않는다.'),
+ ('startup_advisor','startup','업무 지시 조언자','CEO','창업을 위해 무엇을 어떤 순서로 직원에게 맡길지 조언하고 바로 사용할 지시문을 작성한다. 모르는 조건은 질문하며 인간 결정을 대신하지 않는다.'),
  ('baek_chief','baek','업무실장','CEO','인간 CEO의 마케팅·사무 업무를 정리하고 우선순위·담당자·완료 기준을 제안한다.'),
  ('baek_marketing','baek','마케팅 전략','CMO','고객·채널·프로모션 가설과 실행 가능한 캠페인 초안을 만든다. 확정되지 않은 제품·가격·효능을 만들지 않는다.'),
  ('baek_content','baek','콘텐츠 담당','CSO','상품 설명·광고 소재·SNS·이메일 초안을 작성한다. 초안을 실제 게시하거나 발송하지 않는다.'),
@@ -116,7 +118,7 @@ def create_campaign(project,goal):
         '실제 인간 결정 없이 사업 선택·지출·게시를 확정하지 않는다. 문서 마지막에 다음 내부 실행 최대 2개를 아래 형식으로 넣는다. '
         '이는 실행 제안이며 인간 승인을 위조할 수 없다. 후보 업무는 소속 직원에게만 배정한다. '
         '```office-actions\n{"actions":[{"agent_id":"소속 직원 ID","title":"구체적 업무","brief":"입력과 완료기준","kind":"document"}]}\n```\n'
-        '가능한 직원: '+','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith('_review')))
+        '가능한 직원: '+','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith(('_review','_advisor'))))
     specs.append((synthesis,project+'_chief','인간 CEO 의사결정 보고',synthesis_prompt,'synthesis',ids,True))
     with office.lock(),office.db() as c:
         c.execute('INSERT INTO campaigns VALUES (?,?,?,?,?)',(cid,project,goal,'ACTIVE',office.now()))
@@ -135,7 +137,7 @@ def parse_actions(text,project):
     for a in actions:
         if not isinstance(a,dict) or set(a)!={'agent_id','title','brief','kind'}: raise ValueError('Invalid action schema')
         e=employee(a['agent_id'])
-        if e['project']!=project or a['kind']!='document': raise ValueError('Only same-office internal document work is auto-assigned')
+        if e['project']!=project or a['kind']!='document' or e['id'].endswith('_advisor'): raise ValueError('Only same-office internal document work is auto-assigned; advice stays user-directed')
         if any(not isinstance(a[k],str) or not 1<=len(a[k])<=4000 for k in ['title','brief']): raise ValueError('Invalid action content')
         valid.append(a)
     return valid
@@ -177,7 +179,7 @@ def ceo_decide(project,decision,reason,campaign=None):
             for t in c.execute("SELECT id FROM tasks WHERE campaign_id=? AND status IN ('READY','PROPOSED','REVIEW','WAITING_EXTERNAL')",(campaign,)).fetchall(): office.state(c,t['id'],'CANCELLED','Human CEO stopped campaign')
         elif decision!='KILL':
             # Turn the recorded instruction into internal planning work, never an external authorization.
-            staff=','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith('_review'))
+            staff=','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith(('_review','_advisor')))
             brief='인간 CEO 지침을 반영해 다음 내부 업무를 정리한다. 지침: '+reason+'\n사업 방향을 외부 행동 승인으로 확대하지 않는다. '
             brief+='최대 2개 새 문서 업무를 ```office-actions\n{"actions":[{"agent_id":"담당 ID","title":"업무","brief":"입력과 완료 기준","kind":"document"}]}\n``` 형식으로 제안한다. 없으면 빈 배열. 담당: '+staff
             c.execute('INSERT INTO tasks(id,project,title,prompt,role,status,criteria,dependencies,important,created,updated,owner_agent,campaign_id,task_kind,dedupe_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -233,7 +235,7 @@ def daily():
             live=c.execute("SELECT 1 FROM tasks WHERE project=? AND owner_agent IS NOT NULL AND status NOT IN ('DONE','CANCELLED')",(project,)).fetchone()
             mission=c.execute('SELECT mission FROM office_missions WHERE project=?',(project,)).fetchone()['mission']
         if not live:
-            staff=','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith('_review'))
+            staff=','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith(('_review','_advisor')))
             assign(project+'_chief',day+' 업무 점검',mission+'\n이전 결과와 인간 CEO의 지침을 검토하고 오늘의 우선순위, 미확인, 실험, 완료 기준을 제안한다. 불필요한 반복 자료 작성을 피한다. '
               '실제로 새로 필요한 내부 문서 작업만 최대 2개를 마지막에 작성한다. 없으면 빈 actions 배열. '
               '```office-actions\n{"actions":[{"agent_id":"담당 ID","title":"새로운 업무","brief":"입력과 완료 기준","kind":"document"}]}\n```\n담당 ID: '+staff,
@@ -252,7 +254,7 @@ def main():
     a=s.add_parser('run'); a.add_argument('--limit',type=int,default=4); a.add_argument('--project',choices=PROJECTS)
     a=s.add_parser('decide'); a.add_argument('project',choices=PROJECTS); a.add_argument('decision'); a.add_argument('reason'); a.add_argument('--campaign')
     args=p.parse_args(); office.init()
-    if args.cmd=='init': print('12 employees initialized')
+    if args.cmd=='init': print(str(len(STAFF))+' employees initialized')
     elif args.cmd=='status': print(json.dumps(snapshot(),ensure_ascii=False,indent=2))
     elif args.cmd=='campaign': print(json.dumps(create_campaign(args.project,args.goal),ensure_ascii=False))
     elif args.cmd=='run': print(json.dumps(run_queue(args.limit,args.project)))

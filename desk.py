@@ -4,7 +4,7 @@ from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
-import office, team, orders
+import office, team, orders, advisor
 
 BUSY=threading.Lock()
 JOB={'status':'대기','detail':''}
@@ -55,7 +55,25 @@ def render(project,token):
         if t['status'] in {'REVIEW','FAILED','WAITING_EXTERNAL','WAITING_QUOTA','NEEDS_LOGIN','BLOCKED','WAITING_HUMAN'}:
             retry=form('retry',f'<input type="hidden" name="task" value="{t["id"]}"><button class="small">점검 후 재시도 대기</button>') if t['revisions']<cfg['max_revision_rounds'] else '<p class="muted">수정 한도 도달 · 새 자료나 구체적인 지침이 필요합니다.</p>'
         rows+=f'<tr><td>{esc(t["title"])}</td><td>{esc(names.get(t["owner_agent"],t["role"]))}</td><td>{esc(states.get(t["status"],t["status"]))}{retry}</td><td>{links}</td></tr>'
-    options=''.join(f'<option value="{e["id"]}">{esc(e["name"])}</option>' for e in employees if not e['id'].endswith('_review'))
+    options=''.join(f'<option value="{e["id"]}">{esc(e["name"])}</option>' for e in employees if not e['id'].endswith(('_review','_advisor')))
+    examples=('마케팅과 주문 정리가 겹쳐 바빠. 오늘 무엇을 누구에게 맡기면 좋을까?' if project=='baek' else '창업하고 싶은데 아직 아이템이 없어. 직원들에게 무엇부터 시키면 좋을까?')
+    advice_section='<section id="advisor"><h2>무엇을 어떻게 맡길지, 조언자에게 물어보세요</h2><p>막연한 고민도 괜찮습니다. 지금 맡길 일·담당 직원·진행 방식·준비 자료를 추천하고 지시문을 써 드립니다.</p>'
+    advice_section+=form('advisor',f'<label>현재 상황과 하고 싶은 일<textarea name="question" maxlength="8000" required placeholder="{esc(examples)}"></textarea></label><p class="muted">고객 이름·연락처·주문 행은 여기에 붙여 넣지 마세요. 상담은 현재 선택한 사무실의 기록만 참고합니다.</p><button>조언과 지시문 추천받기</button>')
+    advice_section+='<p class="muted">추천받기만으로 업무가 배정되지는 않습니다. 상담이 끝나면 새로고침하고 추천 지시문을 확인하세요.</p>'
+    for history_index,item in enumerate(advisor.latest(project)):
+        advice_section+=f'<details {"open" if history_index==0 else ""}><summary>{esc(item["question"])}</summary><details><summary>전체 조언과 확인 질문 보기</summary><p style="white-space:pre-wrap">{esc(item["explanation"])}</p></details>'
+        for index,p in enumerate(item['proposals'],1):
+            label={'single':'직원 한 명에게 지시','team':'팀 협업으로 진행','orders':'로컬 주문지 정리'}[p['mode']]
+            advice_section+=f'<article><h3>{index}. {esc(p["title"])}</h3><p>{esc(p["reason"])}</p><p>추천 담당: {esc(names[p["agent_id"]])} · {label}</p><p>준비 자료: {esc(" / ".join(p["materials"]) or "추가 자료 없이 시작 가능")}</p>'
+            if p['mode']=='orders':
+                advice_section+=f'<p style="white-space:pre-wrap">{esc(p["brief"])}</p><a href="#orders">주문 파일 선택하러 가기</a>'
+            elif p['mode']=='team':
+                advice_section+=form('campaign',f'<label>수정해서 사용할 팀 지시문<textarea name="goal" maxlength="8000" required>{esc(p["brief"])}</textarea></label><button>이 지시문으로 팀에 배정</button>')
+            else:
+                advice_section+=form('assign',f'<input type="hidden" name="agent" value="{p["agent_id"]}"><label>업무 제목<input name="title" maxlength="200" value="{esc(p["title"])}" required></label><label>수정해서 사용할 지시문<textarea name="brief" maxlength="8000" required>{esc(p["brief"])}</textarea></label><button>이 지시문으로 직원에게 배정</button>')
+            advice_section+='</article>'
+        advice_section+='</details>'
+    advice_section+='</section>'
     camps=[c for c in ts['campaigns'] if c['project']==project]
     campopts='<option value="">사무실 전체 지침</option>'+''.join(f'<option value="{c["id"]}">{esc(c["goal"][:65])}</option>' for c in camps)
     decisions=''.join(f'<li>{esc(d["decision"])} · {esc(d["reason"])}</li>' for d in ts['ceo_decisions'] if d['project']==project)
@@ -65,12 +83,13 @@ def render(project,token):
     if project=='baek':
         downloads=''.join(f'<li><a href="/orders/{r["id"]}">정리된 주문지 받기</a> · {r["rows"]}행 · 점검 {r["flagged"]}행</li>' for r in orders.receipts())
         order_section='<section><h2>주문지 정리</h2><p>고객 행은 이 PC에서 처리합니다. 원본과 모든 행을 보존하고, 누락·잘못된 수량·완전 동일 행 의심을 표시합니다.</p><p class="muted">첫 행에 주문번호·상품명·수량 제목이 있는 단일 표. .xlsx 또는 .csv, 최대 20MB·10,000행. 수식·여러 데이터 시트는 값만 담은 사본으로 준비하세요.</p>'+form('orders','<label>주문 파일<input type="file" name="file" accept=".xlsx,.csv" required></label><button>로컬에서 정리</button>',True)+f'<ul>{downloads}</ul></section>'
+    order_section=order_section.replace('<section>','<section id="orders">',1)
     return f'''<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 사무실 v1</title>
 <style>body{{font:16px system-ui,sans-serif;margin:0;background:#f4f3ef;color:#20313d}}main{{max-width:1200px;margin:auto;padding:32px 24px}}nav{{display:flex;gap:12px;flex-wrap:wrap}}a{{color:#1f5f83}}nav a{{padding:12px 18px;background:white;border-radius:8px;text-decoration:none}}nav .active{{background:#233d59;color:white}}header{{padding:16px 0 24px;border-bottom:1px solid #d5d9d8}}h1{{font-size:36px;margin-bottom:8px}}h2{{font-size:23px}}h3{{margin:0}}p{{line-height:1.65}}.muted,small{{color:#536773}}.staff{{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}}article,section{{background:white;padding:22px;border-radius:12px;margin-top:18px}}article p{{font-size:14px}}.bar{{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}}.bar form{{margin:0}}button{{background:#233d59;color:white;border:0;padding:12px 16px;border-radius:7px;font:inherit;cursor:pointer}}button.secondary{{background:#e6eae9;color:#20313d}}button.small{{font-size:12px;padding:5px;margin-top:6px}}textarea,input:not([type=hidden]),select{{box-sizing:border-box;display:block;width:100%;max-width:800px;font:inherit;border:1px solid #a9b6be;border-radius:6px;padding:10px;margin:8px 0 14px}}textarea{{min-height:95px}}label{{display:block;margin:12px 0}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-bottom:1px solid #e0e5e6}}.scroll{{overflow:auto}}details p{{max-height:200px;overflow:auto}}.status{{border-left:4px solid #b48b45;padding-left:16px}}.twocol{{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:18px}}li{{margin:10px 0}}code{{overflow-wrap:anywhere}}</style>
 <main><nav><a class="{'active' if project=='baek' else ''}" href="/?office=baek">백년화편 업무 지원</a><a class="{'active' if project=='startup' else ''}" href="/?office=startup">신규 스타트업 사무실</a></nav>
 <header><p class="muted">AI 사무실 v1 · 인간 CEO의 업무실</p><h1>{team.PROJECTS[project]}</h1><p>직원별로 생각하고, 결과를 전달하고, 별도 검수를 거칩니다.</p><small>주 실행 {'Claude Code' if cfg['primary']=='claude_code' else 'Codex'} · 검수 Codex · 추가 모델 API 없음</small></header>
 <p class="status">{'자동 업무 일시정지' if pause else '자동 업무 활성'} · 매일 09:00 두 사무실 합계 최대 {cfg.get('daily_team_tasks',4)}건 · 18:00 마감 보고<br>현재 실행: {esc(JOB['status'])} · 완료 여부는 새로고침으로 확인하세요.</p><details><summary>최근 실행 상세</summary><p>{esc(JOB['detail'])}</p></details><div class="bar">{tools}</div>
-<h2>직원 {len(employees)}명</h2><div class="staff">{employee_cards}</div>
+{advice_section}<h2>직원 {len(employees)}명</h2><div class="staff">{employee_cards}</div>
 <div class="twocol"><section><h2>함께 고민할 목표</h2><p>직원 3명이 독립 검토하고 실장이 종합합니다. 검수 통과 후 내부 후속 업무를 최대 2개 배정합니다.</p>{form('campaign','<label>목표와 완료 기준<textarea name="goal" maxlength="8000" required placeholder="예: 이번 주 마케팅 업무를 정리하고 실행 초안까지 만들어줘"></textarea></label><button>팀에 목표 배정</button>')}</section>
 <section><h2>직원에게 직접 지시</h2>{form('assign','<label>담당 직원<select name="agent">'+options+'</select></label><label>업무 제목<input name="title" maxlength="200" required></label><label>입력 자료와 완료 기준<textarea name="brief" maxlength="8000" required></textarea></label><button>업무 배정</button>')}</section></div>
 {order_section}<section class="scroll"><h2>업무와 결과</h2><table><tr><th>업무</th><th>담당</th><th>상태</th><th>결과</th></tr>{rows}</table></section>
@@ -126,7 +145,8 @@ def handler_class(port):
                 if not secrets.compare_digest(fields.get('token',''),token): self.send_error(403); return
                 p=fields.get('project')
                 if p not in team.PROJECTS: raise ValueError('사무실을 선택하세요.')
-                if self.path=='/run': background(lambda:team.run_queue(4,p))
+                if self.path=='/advisor': background(lambda:advisor.ask(p,fields['question']))
+                elif self.path=='/run': background(lambda:team.run_queue(4,p))
                 elif self.path=='/campaign': team.create_campaign(p,fields['goal'][:8000])
                 elif self.path=='/assign':
                     if team.employee(fields['agent'])['project']!=p: raise ValueError('다른 사무실 직원입니다.')
