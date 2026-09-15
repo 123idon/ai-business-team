@@ -26,11 +26,14 @@ DEFAULT_MISSIONS={
  'startup':'인간 CEO와 함께 신규 스타트업을 창립한다. 직원들이 독립적으로 후보·문제·근거를 고민하고 공개 조사·문서·실험 설계를 수행한다. 사업 선택과 외부 약속은 인간 CEO가 결정한다.'}
 
 def init_schema():
+    import meetings
+    meetings.init()
     with office.db() as c:
         c.executescript('''
         CREATE TABLE IF NOT EXISTS employees(id TEXT PRIMARY KEY,project TEXT NOT NULL,name TEXT NOT NULL,role TEXT NOT NULL,responsibility TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS office_missions(project TEXT PRIMARY KEY,mission TEXT NOT NULL,updated TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS campaigns(id TEXT PRIMARY KEY,project TEXT NOT NULL,goal TEXT NOT NULL,status TEXT NOT NULL,created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS campaign_requests(request_id TEXT PRIMARY KEY,project TEXT NOT NULL,result TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS employee_notes(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,task_id TEXT NOT NULL,summary TEXT NOT NULL,observed TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS handoffs(id TEXT PRIMARY KEY,project TEXT NOT NULL,from_agent TEXT NOT NULL,to_agent TEXT NOT NULL,task_id TEXT NOT NULL,body TEXT NOT NULL,observed TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS ceo_decisions(id TEXT PRIMARY KEY,project TEXT NOT NULL,campaign_id TEXT,decision TEXT NOT NULL,reason TEXT NOT NULL,source TEXT NOT NULL,observed TEXT NOT NULL);
@@ -102,7 +105,7 @@ def remember_result(task,result):
         chief=task['project']+'_chief'
         c.execute('INSERT INTO handoffs VALUES (?,?,?,?,?,?,?)',(office.uid(),task['project'],task['owner_agent'],chief,task['id'],task['title']+' 결과 제출',office.now()))
 
-def create_campaign(project,goal):
+def create_campaign(project,goal,request_id=None):
     if project not in PROJECTS or not goal.strip(): raise ValueError('Office and goal are required')
     cid=office.uid()[:12]
     selected=(['baek_marketing','baek_admin','baek_content'] if project=='baek' else ['startup_research','startup_strategy','startup_product'])
@@ -120,13 +123,21 @@ def create_campaign(project,goal):
         '```office-actions\n{"actions":[{"agent_id":"소속 직원 ID","title":"구체적 업무","brief":"입력과 완료기준","kind":"document"}]}\n```\n'
         '가능한 직원: '+','.join(a[0] for a in STAFF if a[1]==project and not a[0].endswith(('_review','_advisor'))))
     specs.append((synthesis,project+'_chief','인간 CEO 의사결정 보고',synthesis_prompt,'synthesis',ids,True))
-    with office.lock(),office.db() as c:
+    with office.db() as c:
+        c.execute('BEGIN IMMEDIATE')
+        if request_id:
+            prior=c.execute('SELECT project,result FROM campaign_requests WHERE request_id=?',(request_id,)).fetchone()
+            if prior:
+                if prior['project']!=project: raise ValueError('다른 사무실 요청입니다.')
+                return json.loads(prior['result'])
         c.execute('INSERT INTO campaigns VALUES (?,?,?,?,?)',(cid,project,goal,'ACTIVE',office.now()))
         for tid,aid,title,brief,kind,deps,important in specs:
             role=next(a[3] for a in STAFF if a[0]==aid)
             c.execute('INSERT INTO tasks(id,project,title,prompt,role,status,criteria,dependencies,important,created,updated,owner_agent,campaign_id,task_kind,dedupe_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 (tid,project,title,brief,role,'READY',json.dumps(['가정','근거','미확인','실험','완료 기준']),json.dumps(deps),int(important),office.now(),office.now(),aid,cid,kind,cid+':'+aid))
-    return {'campaign_id':cid,'drafts':ids,'synthesis':synthesis}
+        result={'campaign_id':cid,'drafts':ids,'synthesis':synthesis}
+        if request_id: c.execute('INSERT INTO campaign_requests VALUES (?,?,?)',(request_id,project,json.dumps(result)))
+    return result
 
 def parse_actions(text,project):
     match=re.search(r'```office-actions\s*(\{.*?\})\s*```',text,re.S)

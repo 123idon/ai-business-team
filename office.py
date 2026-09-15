@@ -259,6 +259,9 @@ def context(task):
     for e in evidence: e['content']=e['content'][:2400]
     import team
     staff_context=team.employee_context(task) if task.get('owner_agent') else ''
+    if task.get('task_kind')=='meeting':
+        import meetings
+        staff_context+=meetings.context(task)
     research=task.get('task_kind')=='public_research'
     scope='팀 목표 중 본인 역할 범위만 수행한다. 팀의 공개 조회는 시장조사 직원 담당이다. 종합 담당과 검수자는 인계된 원문 내용과 관리자가 기록한 조회 증거를 사용하며 직접 다시 조회했다는 주장을 하지 않는다. 팀 전체 조건을 각 직원의 중복 실행 의무로 해석하지 않는다.' if task.get('owner_agent') else ''
     return '\n'.join([policy,procedure,role,staff_context,scope,'업무: '+task['title'],task['prompt'],
@@ -483,7 +486,7 @@ def backup():
             for name in ['config.json','config.example.json','README.md','AGENTS.md','CLAUDE.md']:
                 if (ROOT/name).exists(): z.write(ROOT/name,name)
             for p in ROOT.iterdir():
-                if p.is_file() and p.suffix in {'.ps1','.cmd','.py','.mjs'}:
+                if p.is_file() and p.suffix in {'.ps1','.cmd','.py','.mjs','.js'}:
                     z.write(p,p.name)
         temp.unlink()
         return out
