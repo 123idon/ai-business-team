@@ -447,13 +447,17 @@ def restore_copy(archive, dest):
 
 def dashboard():
     s=snapshot(); counts={st:sum(t['status']==st for t in s['tasks']) for st in ['READY','RUNNING','DONE','REVIEW']}
-    cards=''.join(f'<article><b>{n}</b><span>{label}</span></article>' for label,n in counts.items())
-    rows=''.join('<tr>'+''.join('<td>'+html.escape(str(t[k]))+'</td>' for k in ['title','role','status','updated'])+'</tr>' for t in s['tasks'])
-    artifacts=''.join(f'<li>{html.escape(a["path"])} · 검증 {a["verified"]}</li>' for a in s['artifacts'])
+    names={'READY':'실행 대기','RUNNING':'진행 중','DONE':'완료','REVIEW':'수정·검수 대기','WAITING_QUOTA':'사용 한도 대기','NEEDS_LOGIN':'로그인 필요','WAITING_EXTERNAL':'외부 조건 대기','FAILED':'실행 실패','BLOCKED':'실행 차단'}
+    providers={'claude_code':'Claude Code','codex_cli':'Codex'}
+    cards=''.join(f'<article><b>{n}</b><span>{names[label]}</span></article>' for label,n in counts.items())
+    rows=''.join('<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in [t['title'],t['role'],names.get(t['status'],t['status']),t['updated']])+'</tr>' for t in s['tasks'])
+    titles={t['id']:t['title'] for t in s['tasks']}
+    purposes={r['id']:('검수 보고' if r['purpose']=='review' else '결과 문서') for r in s['runs']}
+    artifacts=''.join(f'<li><a href="/artifact/{a["id"]}">{html.escape(titles[a["task_id"]])} · {purposes[a["run_id"]]}</a> · '+('채택된 버전' if a['verified'] else '이전 기록')+'</li>' for a in s['artifacts'])
     requests=''.join(f'<li>{html.escape(r["action"])} — {html.escape(r["reason"])}</li>' for r in s['human_requests'] if r['status']=='OPEN')
     return f'''<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI 사무실</title><style>body{{font:16px system-ui;margin:0;background:#f4f6fa;color:#1a2940}}main{{max-width:1100px;margin:auto;padding:40px 24px}}header{{border-bottom:1px solid #ccd5e2;padding-bottom:24px}}small{{color:#546783}}h1{{font-size:38px;margin:8px 0}}.cards{{display:flex;gap:18px;flex-wrap:wrap;margin:28px 0}}article{{background:white;padding:24px;border-radius:14px;min-width:140px;flex:1}}article b{{font-size:32px;display:block}}article span{{color:#65758a}}table{{width:100%;border-collapse:collapse;background:white}}td,th{{padding:14px;text-align:left;border-bottom:1px solid #e1e7ee}}section{{margin-top:30px;overflow:auto}}li{{margin:10px 0;overflow-wrap:anywhere}}.pill{{background:#dcece4;color:#155d42;padding:6px 12px;border-radius:20px;display:inline-block}}</style>
-    <main><header><small>LEE · LOCAL AI OFFICE · v1.1</small><h1>AI 사무실</h1><p>공통 기억과 근거로 일하고, 결과를 검수합니다.</p><span class="pill">추가 모델 API 사용 안 함</span><p>주 실행: {html.escape(config()['primary'])} · 검수: {html.escape(config()['reviewer'])}</p></header>
+    <main><header><small>LEE · LOCAL AI OFFICE · v1.1</small><h1>AI 사무실</h1><p>공통 기억과 근거로 일하고, 결과를 검수합니다.</p><span class="pill">추가 모델 API 사용 안 함</span><p>주 실행: {providers[config()['primary']]} · 검수: {providers[config()['reviewer']]}</p></header>
     <div class="cards">{cards}</div><section><h2>업무 현황</h2><table><tr><th>업무</th><th>담당</th><th>상태</th><th>최종 변경 (UTC)</th></tr>{rows}</table></section>
     <section><h2>사람에게 필요한 작업</h2><ul>{requests or '<li>현재 등록된 요청 없음</li>'}</ul></section>
     <section><h2>산출물</h2><ul>{artifacts or '<li>아직 없음</li>'}</ul></section><p><small>로컬 원장을 표시하는 읽기 전용 화면 · 새로고침으로 갱신 · PC 절전/종료 중 실행되지 않음</small></p></main></html>'''
@@ -463,8 +467,16 @@ def serve(port):
         def do_GET(self):
             if self.headers.get('Host') not in {f'127.0.0.1:{port}',f'localhost:{port}'}:
                 self.send_error(403); return
-            if self.path not in {'/','/status.json'}: self.send_error(404); return
-            data=(json.dumps(snapshot(),ensure_ascii=False) if self.path=='/status.json' else dashboard()).encode('utf-8')
+            if re.fullmatch(r'/artifact/[a-f0-9]{32}',self.path):
+                with db() as c: a=c.execute('SELECT * FROM artifacts WHERE id=?',(self.path.rsplit('/',1)[1],)).fetchone()
+                if not a: self.send_error(404); return
+                path=(ROOT/a['path']).resolve()
+                if not path.is_relative_to(ROOT/'runs') or not path.is_file(): self.send_error(404); return
+                if digest(path.read_bytes())!=a['sha256']: self.send_error(409,'Artifact integrity mismatch'); return
+                content='<html lang="ko"><meta charset="utf-8"><title>AI 사무실 산출물</title><style>body{font:17px system-ui;max-width:900px;margin:40px auto;padding:20px}pre{white-space:pre-wrap;line-height:1.7}</style><a href="/">← 사무실로 돌아가기</a><pre>'+html.escape(path.read_text(encoding='utf-8'))+'</pre></html>'
+            elif self.path in {'/','/status.json'}: content=json.dumps(snapshot(),ensure_ascii=False) if self.path=='/status.json' else dashboard()
+            else: self.send_error(404); return
+            data=content.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type','application/json; charset=utf-8' if self.path.endswith('json') else 'text/html; charset=utf-8')
             self.send_header('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'")
