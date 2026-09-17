@@ -10,5 +10,6 @@
   "automatic_execution": false,
   "team_mode": true,
   "daily_team_tasks": 4,
+  "chief_briefings": true,
   "spreadsheet_node": ""
 }

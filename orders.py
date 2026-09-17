@@ -151,6 +151,8 @@ def process(path):
     with office.lock(),office.db() as c:
         office.state(c,tid,'DONE',json.dumps({'rows':data['row_count'],'flagged':data['flagged_rows'],'order_job':job}))
         c.execute('INSERT INTO employee_notes VALUES (?,?,?,?,?)',(office.uid(),'baek_orders',tid,f"주문 {data['row_count']}행을 보존해 정리. 점검 대상 {data['flagged_rows']}행. 고객 자료는 로컬 전용.",office.now()))
+    import briefings
+    briefings.after_work('baek')
     return receipt
 
 def receipts():

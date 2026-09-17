@@ -29,7 +29,8 @@ def transcript_html(room_id,project):
     statuses={'READY':'발언 순서를 기다리는 중','RUNNING':'의견 작성 중','REVIEW':'발언 형식 확인 필요','FAILED':'발언 생성 실패','WAITING_QUOTA':'구독 한도 대기','NEEDS_LOGIN':'로그인 필요','WAITING_EXTERNAL':'실행 조건 확인 필요','CANCELLED':'취소'}
     for t in data['turns']:
         body=t['body'] if t['status'] in {'DONE','POSTED'} else statuses.get(t['status'],t['status'])
-        out+=f'<article><strong>{e(names.get(t["speaker"],t["speaker"]))}</strong><p style="white-space:pre-wrap">{e(body)}</p></article>'
+        card=f'<article><strong>{e(names.get(t["speaker"],t["speaker"]))}</strong><p style="white-space:pre-wrap">{e(body)}</p></article>'
+        out+=card if t['speaker']=='human' else '<details><summary>'+e(names.get(t['speaker'],t['speaker']))+' · 개별 발언 보기</summary>'+card+'</details>'
     return out
 
 def section(project,form,room_id=None):

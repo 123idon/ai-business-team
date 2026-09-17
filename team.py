@@ -73,7 +73,7 @@ def employee_context(task):
         notes=[dict(r) for r in c.execute('SELECT task_id,summary,observed FROM employee_notes WHERE agent_id=? ORDER BY observed DESC LIMIT 5',(agent['id'],))]
         decisions=[dict(r) for r in c.execute('SELECT decision,reason,observed FROM ceo_decisions WHERE project=? ORDER BY observed DESC LIMIT 5',(agent['project'],))]
         material=[]; deps=json.loads(task['dependencies'])
-        if agent['id'].endswith('_chief') and not deps:
+        if agent['id'].endswith('_chief') and not deps and task.get('task_kind')!='briefing':
             deps=[r['task_id'] for r in c.execute('SELECT task_id FROM handoffs WHERE to_agent=? AND project=? ORDER BY observed DESC LIMIT 6',(agent['id'],agent['project']))]
         for dep in deps:
             prior=c.execute('SELECT project,status,title FROM tasks WHERE id=?',(dep,)).fetchone()
@@ -230,6 +230,10 @@ def run_queue(limit=4,project=None):
         if status=='REVIEW' and task['revisions']<office.config()['max_revision_rounds']:
             office.retry(task['id'])
         process_followups()
+    if outcomes:
+        import briefings
+        with office.db() as c: projects={c.execute('SELECT project FROM tasks WHERE id=?',(r['task'],)).fetchone()[0] for r in outcomes}
+        for selected in projects: briefings.after_work(selected)
     return outcomes
 
 def daily():

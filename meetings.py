@@ -82,7 +82,7 @@ def context(task):
         if turn['status'] in {'POSTED','DONE'}: previous.append({'speaker':turn['speaker'],'body':turn['body'][:5000]})
     return '\n실행 직전 확인한 실제 선행 회의 발언 (아직 발언하지 않은 직원의 생각은 알 수 없다):\n'+json.dumps(previous[-15:],ensure_ascii=False)
 
-def run_turns(ids,revise=False):
+def run_turns(ids,revise=False,summarize=True):
     results=[]
     for tid in ids:
         while True:
@@ -95,4 +95,8 @@ def run_turns(ids,revise=False):
             if revise and status=='REVIEW' and task['revisions']<office.config()['max_revision_rounds']:
                 office.retry(tid)
             else: break
+    if summarize and results:
+        import briefings
+        with office.db() as c: projects={c.execute('SELECT project FROM tasks WHERE id=?',(r['task'],)).fetchone()[0] for r in results}
+        for project in projects: briefings.after_work(project)
     return results

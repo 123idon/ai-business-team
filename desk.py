@@ -4,7 +4,7 @@ from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit, urlencode
-import office, team, orders, advisor, meetings, meeting_ui
+import office, team, orders, advisor, meetings, meeting_ui, briefings
 
 BUSY=threading.Lock()
 PENDING=collections.deque()
@@ -110,18 +110,21 @@ def render(project,token,fragments=False,room_id=None,notice=''):
     order_section=order_section.replace('<section>','<section id="orders">',1)
     meeting_section,transcript=meeting_ui.section(project,form,room_id)
     active=meeting_ui.activity(project)
-    if fragments: return {'live-activity':active,'live-employees':employee_cards,'live-tasks':rows,'meeting-transcript':transcript}
+    chief_report=briefings.panel(project)
+    if fragments: return {'live-chief-report':chief_report,'live-activity':active,'live-employees':employee_cards,'live-tasks':rows,'meeting-transcript':transcript}
     notice_html='<p role="status" class="status">'+esc(notice)+'</p>' if notice else ''
     return f'''<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI 사무실 v1</title>
 <style>body{{font:16px system-ui,sans-serif;margin:0;background:#f4f3ef;color:#20313d}}main{{max-width:1200px;margin:auto;padding:32px 24px}}nav{{display:flex;gap:12px;flex-wrap:wrap}}a{{color:#1f5f83}}nav a{{padding:12px 18px;background:white;border-radius:8px;text-decoration:none}}nav .active{{background:#233d59;color:white}}header{{padding:16px 0 24px;border-bottom:1px solid #d5d9d8}}h1{{font-size:36px;margin-bottom:8px}}h2{{font-size:23px}}h3{{margin:0}}p{{line-height:1.65}}.muted,small{{color:#536773}}.staff{{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}}article,section{{background:white;padding:22px;border-radius:12px;margin-top:18px}}article p{{font-size:14px}}.bar{{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}}.bar form{{margin:0}}button{{background:#233d59;color:white;border:0;padding:12px 16px;border-radius:7px;font:inherit;cursor:pointer}}button.secondary{{background:#e6eae9;color:#20313d}}button.small{{font-size:12px;padding:5px;margin-top:6px}}textarea,input:not([type=hidden]),select{{box-sizing:border-box;display:block;width:100%;max-width:800px;font:inherit;border:1px solid #a9b6be;border-radius:6px;padding:10px;margin:8px 0 14px}}textarea{{min-height:95px}}label{{display:block;margin:12px 0}}table{{width:100%;border-collapse:collapse}}td,th{{text-align:left;padding:12px;border-bottom:1px solid #e0e5e6}}.scroll{{overflow:auto}}details p{{max-height:200px;overflow:auto}}.status{{border-left:4px solid #b48b45;padding-left:16px}}.twocol{{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:18px}}li{{margin:10px 0}}code{{overflow-wrap:anywhere}}</style>
+<style>#chief-report{{border-top:5px solid #233d59}}.chief-copy{{max-width:920px}}.chief-copy h3{{margin:26px 0 10px;color:#1f5f83;font-size:20px}}.chief-copy p{{font-size:16px;line-height:1.85;margin:10px 0;overflow-wrap:anywhere}}</style>
 <main><nav><a class="{'active' if project=='baek' else ''}" href="/?office=baek">백년화편 업무 지원</a><a class="{'active' if project=='startup' else ''}" href="/?office=startup">신규 스타트업 사무실</a></nav>
 <header><p class="muted">AI 사무실 v1 · 인간 CEO의 업무실</p><h1>{team.PROJECTS[project]}</h1><p>직원별로 생각하고, 결과를 전달하고, 별도 검수를 거칩니다.</p><small>주 실행 {'Claude Code' if cfg['primary']=='claude_code' else 'Codex'} · 검수 Codex · 추가 모델 API 없음</small></header>
-{notice_html}<section id="activity"><h2>지금 직원들이 하는 일</h2><div id="live-activity">{active}</div><small id="connection-state">실제 작업 기록으로 자동 갱신합니다.</small></section>
+{notice_html}<section id="chief-report"><h2>업무실장 종합 보고</h2><div id="live-chief-report">{chief_report}</div>{form('briefing','<button>최신 결과로 종합 보고 정리</button>')}</section>
+<section id="activity"><h2>지금 직원들이 하는 일</h2><div id="live-activity">{active}</div><small id="connection-state">실제 작업 기록으로 자동 갱신합니다.</small></section>
 <p class="status">{'자동 업무 일시정지' if pause else '자동 업무 활성'} · 매일 09:00 두 사무실 합계 최대 {cfg.get('daily_team_tasks',4)}건 · 18:00 마감 보고</p><details><summary>최근 실행 상세</summary><p>{esc(JOB['detail'])}</p></details><div class="bar">{tools}</div>
-{meeting_section}{advice_section}<h2>직원 {len(employees)}명</h2><div class="staff" id="live-employees">{employee_cards}</div>
+{meeting_section}{advice_section}<details><summary>직원 {len(employees)}명 · 개별 현황 보기</summary><div class="staff" id="live-employees">{employee_cards}</div></details>
 <div class="twocol"><section><h2>함께 고민할 목표</h2><p>직원 3명이 독립 검토하고 실장이 종합합니다. 검수 통과 후 내부 후속 업무를 최대 2개 배정합니다.</p>{form('campaign','<label>목표와 완료 기준<textarea name="goal" maxlength="8000" required placeholder="예: 이번 주 마케팅 업무를 정리하고 실행 초안까지 만들어줘"></textarea></label><button>팀에 목표 배정</button>')}</section>
 <section><h2>직원에게 직접 지시</h2>{form('assign','<label>담당 직원<select name="agent">'+options+'</select></label><label>업무 제목<input name="title" maxlength="200" required></label><label>입력 자료와 완료 기준<textarea name="brief" maxlength="8000" required></textarea></label><button>업무 배정</button>')}</section></div>
-{order_section}<section class="scroll" id="tasks"><h2>업무와 결과</h2>{notice_html}<table><thead><tr><th>업무</th><th>담당</th><th>상태</th><th>결과</th></tr></thead><tbody id="live-tasks">{rows}</tbody></table></section>
+{order_section}<section class="scroll" id="tasks"><h2>업무와 결과</h2>{notice_html}<p>결론은 위의 업무실장 종합 보고에서 확인하세요.</p><details><summary>개별 업무·원문·검수 기록 펼치기</summary><table><thead><tr><th>업무</th><th>담당</th><th>상태</th><th>결과</th></tr></thead><tbody id="live-tasks">{rows}</tbody></table></details></section>
 <section><h2>인간 CEO 결정</h2><p>우선순위와 방향을 직원 기억에 전달합니다. 특정 목표의 중단을 선택하면 그 목표의 대기 업무를 취소합니다.</p>{form('decision','<label>대상<select name="campaign">'+campopts+'</select></label><label>결정<select name="decision"><option value="DIRECTION">방향 지시</option><option value="PRIORITY">우선순위</option><option value="ITERATE">수정·재검토</option><option value="SIMPLIFY">범위 축소</option><option value="SCALE">확대 방향</option><option value="KILL">해당 목표 중단</option></select></label><label>이유와 구체적인 지침<textarea name="reason" maxlength="8000" required></textarea></label><button>내 결정 기록</button>')}<ul>{decisions or '<li>등록된 CEO 결정 없음</li>'}</ul></section>
 <section><h2>구독 구성</h2><p>구독 전환 후 Codex 단독을 선택하면 직원과 기록은 유지되고 실행 도구만 바뀝니다.</p>{form('provider','<select name="primary"><option value="claude_code">Claude 실행 + Codex 검수</option><option value="codex_cli">Codex 단독 · 별도 세션 검수</option></select><button>실행 도구 변경</button>')}</section>
 <p class="muted">PC가 켜져 있고 사용자 로그인 상태일 때 실행됩니다. AI 직원은 매 작업마다 새 세션으로 호출되며, 업무 기억은 사무실에 남습니다. v1 실행 범위는 문서 작성·공개 조사·주문지 정리입니다. 외부 발송·게시·결제 기능은 연결되어 있지 않습니다.</p></main><script src="/desk_live.js" defer></script></html>'''
@@ -184,6 +187,8 @@ def handler_class(port):
                 if p not in team.PROJECTS: raise ValueError('사무실을 선택하세요.')
                 notice='요청을 접수했습니다.'; anchor='activity'; room=None
                 if self.path=='/advisor': background(lambda:advisor.ask(p,fields['question']))
+                elif self.path=='/briefing':
+                    background(lambda:briefings.refresh(p)); notice='업무실장에게 최신 결과의 종합 보고를 요청했습니다.'; anchor='chief-report'
                 elif self.path=='/run': background(lambda:team.run_queue(4,p))
                 elif self.path=='/campaign':
                     cid=team.create_campaign(p,fields['goal'][:8000],request_id=fields.get('request_id'))
